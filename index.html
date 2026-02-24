@@ -9,7 +9,7 @@
         * { box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 600px;
+            max-width: 900px;
             margin: 50px auto;
             padding: 20px;
             background: #f5f5f5;
@@ -45,23 +45,123 @@
         }
         .btn:hover { background: #0056b3; }
         .btn:disabled { background: #ccc; cursor: not-allowed; }
-        .result {
-            margin-top: 20px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            white-space: pre-wrap;
-            font-family: monospace;
-            max-height: 300px;
-            overflow-y: auto;
-            border: 1px solid #e9ecef;
-        }
-        .error { background: #ffe6e6; color: #cc0000; border-color: #ffcccc; }
-        .success { background: #e6ffe6; border-color: #ccffcc; }
-        .filename { color: #666; margin-top: 10px; font-size: 14px; }
-        .download-btn { background: #28a745; margin-left: 10px; }
-        .download-btn:hover { background: #1e7e34; }
+        .file-count { color: #666; margin-top: 10px; font-size: 14px; }
         .icon { font-size: 48px; margin-bottom: 15px; }
+
+        /* Results carousel */
+        .results-wrapper {
+            margin-top: 30px;
+        }
+        .results-container {
+            display: flex;
+            gap: 20px;
+            overflow-x: auto;
+            padding: 10px 0 20px 0;
+            scroll-snap-type: x mandatory;
+            scrollbar-width: thin;
+            scrollbar-color: #ccc #f0f0f0;
+        }
+        .results-container::-webkit-scrollbar {
+            height: 8px;
+        }
+        .results-container::-webkit-scrollbar-track {
+            background: #f0f0f0;
+            border-radius: 4px;
+        }
+        .results-container::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 4px;
+        }
+        .results-container::-webkit-scrollbar-thumb:hover {
+            background: #aaa;
+        }
+
+        /* Result card */
+        .result-card {
+            flex: 0 0 320px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+            scroll-snap-align: start;
+            display: flex;
+            flex-direction: column;
+        }
+        .result-card.error {
+            border-color: #ffcccc;
+            background: #fff5f5;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            border-bottom: 1px solid #e9ecef;
+            background: #fff;
+            border-radius: 10px 10px 0 0;
+        }
+        .card-filename {
+            font-weight: 500;
+            color: #333;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 180px;
+        }
+        .card-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .card-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        .copy-btn {
+            background: #e9ecef;
+            color: #495057;
+        }
+        .copy-btn:hover { background: #dee2e6; }
+        .copy-btn.copied { background: #28a745; color: white; }
+        .download-btn {
+            background: #007bff;
+            color: white;
+        }
+        .download-btn:hover { background: #0056b3; }
+        .card-content {
+            padding: 15px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow-y: auto;
+            max-height: 250px;
+            flex: 1;
+            line-height: 1.5;
+        }
+        .card-content.error-content {
+            color: #cc0000;
+        }
+
+        /* Download all button */
+        .download-all-btn {
+            background: #28a745;
+            margin-left: 10px;
+        }
+        .download-all-btn:hover { background: #1e7e34; }
+
+        .actions-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
     </style>
 </head>
 <body>
@@ -71,23 +171,32 @@
 
         <div class="upload-area" id="dropArea">
             <div class="icon">📄</div>
-            <p>Dosyayi buraya surukleyin veya tiklayin</p>
-            <p style="color: #999; font-size: 14px;">.udf, .udf.zip veya .xml</p>
-            <input type="file" id="fileInput" accept=".udf,.zip,.xml">
+            <p>Dosyalari buraya surukleyin veya tiklayin</p>
+            <p style="color: #999; font-size: 14px;">.udf, .udf.zip veya .xml (birden fazla secebilirsiniz)</p>
+            <input type="file" id="fileInput" accept=".udf,.zip,.xml" multiple>
         </div>
-        <div class="filename" id="fileName"></div>
-        <button class="btn" id="convertBtn" disabled>Donustur</button>
-        <div id="result"></div>
+        <div class="file-count" id="fileCount"></div>
+        <div class="actions-row">
+            <button class="btn" id="convertBtn" disabled>Donustur</button>
+            <button class="btn download-all-btn" id="downloadAllBtn" style="display: none;">Tumunu Indir</button>
+        </div>
+
+        <div class="results-wrapper" id="resultsWrapper" style="display: none;">
+            <div class="results-container" id="resultsContainer"></div>
+        </div>
     </div>
 
     <script>
         const dropArea = document.getElementById('dropArea');
         const fileInput = document.getElementById('fileInput');
-        const fileName = document.getElementById('fileName');
+        const fileCount = document.getElementById('fileCount');
         const convertBtn = document.getElementById('convertBtn');
-        const result = document.getElementById('result');
-        let selectedFile = null;
-        let convertedText = null;
+        const downloadAllBtn = document.getElementById('downloadAllBtn');
+        const resultsWrapper = document.getElementById('resultsWrapper');
+        const resultsContainer = document.getElementById('resultsContainer');
+
+        let selectedFiles = [];
+        let convertedResults = [];
 
         // Event listeners
         dropArea.addEventListener('click', () => fileInput.click());
@@ -107,39 +216,57 @@
         });
 
         dropArea.addEventListener('drop', (e) => {
-            selectedFile = e.dataTransfer.files[0];
-            updateFileName();
+            selectedFiles = Array.from(e.dataTransfer.files);
+            updateFileCount();
         });
 
         fileInput.addEventListener('change', () => {
-            selectedFile = fileInput.files[0];
-            updateFileName();
+            selectedFiles = Array.from(fileInput.files);
+            updateFileCount();
         });
 
-        convertBtn.addEventListener('click', convert);
+        convertBtn.addEventListener('click', convertAll);
+        downloadAllBtn.addEventListener('click', downloadAll);
 
-        function updateFileName() {
-            if (selectedFile) {
-                fileName.textContent = '✓ ' + selectedFile.name;
+        function updateFileCount() {
+            if (selectedFiles.length > 0) {
+                fileCount.textContent = `✓ ${selectedFiles.length} dosya secildi`;
                 convertBtn.disabled = false;
-                result.innerHTML = '';
+                resultsWrapper.style.display = 'none';
+                downloadAllBtn.style.display = 'none';
+            } else {
+                fileCount.textContent = '';
+                convertBtn.disabled = true;
             }
         }
 
-        async function convert() {
-            if (!selectedFile) return;
+        async function convertAll() {
+            if (selectedFiles.length === 0) return;
 
             convertBtn.disabled = true;
             convertBtn.textContent = 'Donusturuluyor...';
-            result.innerHTML = '';
+            resultsContainer.innerHTML = '';
+            convertedResults = [];
 
+            for (const file of selectedFiles) {
+                const result = await convertFile(file);
+                convertedResults.push(result);
+                renderResultCard(result);
+            }
+
+            resultsWrapper.style.display = 'block';
+            downloadAllBtn.style.display = convertedResults.some(r => !r.error) ? 'inline-block' : 'none';
+            convertBtn.disabled = false;
+            convertBtn.textContent = 'Donustur';
+        }
+
+        async function convertFile(file) {
             try {
-                const arrayBuffer = await selectedFile.arrayBuffer();
+                const arrayBuffer = await file.arrayBuffer();
                 const bytes = new Uint8Array(arrayBuffer);
 
                 let xmlContent;
 
-                // ZIP mi kontrol et (PK header)
                 if (bytes[0] === 0x50 && bytes[1] === 0x4B) {
                     const zip = await JSZip.loadAsync(arrayBuffer);
                     const contentFile = Object.keys(zip.files).find(name => name.endsWith('content.xml'));
@@ -150,11 +277,9 @@
 
                     xmlContent = await zip.files[contentFile].async('string');
                 } else {
-                    // Direkt XML
                     xmlContent = new TextDecoder('utf-8').decode(bytes);
                 }
 
-                // XML parse et
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(xmlContent, 'text/xml');
                 const contentElem = doc.querySelector('content');
@@ -163,18 +288,42 @@
                     throw new Error('XML icinde <content> elementi bulunamadi');
                 }
 
-                convertedText = contentElem.textContent.trim();
-
-                result.innerHTML = `
-                    <div class="result success">${escapeHtml(convertedText)}</div>
-                    <button class="btn download-btn" onclick="downloadTxt()">📥 TXT Indir</button>
-                `;
+                return {
+                    filename: file.name,
+                    content: contentElem.textContent.trim(),
+                    error: null
+                };
             } catch (err) {
-                result.innerHTML = `<div class="result error">Hata: ${escapeHtml(err.message)}</div>`;
+                return {
+                    filename: file.name,
+                    content: null,
+                    error: err.message
+                };
             }
+        }
 
-            convertBtn.disabled = false;
-            convertBtn.textContent = 'Donustur';
+        function renderResultCard(result) {
+            const card = document.createElement('div');
+            card.className = 'result-card' + (result.error ? ' error' : '');
+
+            const baseName = result.filename.replace(/\.(udf|zip|xml)$/gi, '').replace(/\.udf$/gi, '');
+
+            card.innerHTML = `
+                <div class="card-header">
+                    <span class="card-filename" title="${escapeHtml(result.filename)}">${escapeHtml(result.filename)}</span>
+                    ${!result.error ? `
+                        <div class="card-actions">
+                            <button class="card-btn copy-btn" title="Kopyala" onclick="copyText(this, '${escapeAttr(result.content)}')">📋</button>
+                            <button class="card-btn download-btn" title="Indir" onclick="downloadSingle('${escapeAttr(baseName)}', '${escapeAttr(result.content)}')">📥</button>
+                        </div>
+                    ` : ''}
+                </div>
+                <div class="card-content ${result.error ? 'error-content' : ''}">
+                    ${result.error ? 'Hata: ' + escapeHtml(result.error) : escapeHtml(result.content)}
+                </div>
+            `;
+
+            resultsContainer.appendChild(card);
         }
 
         function escapeHtml(text) {
@@ -183,16 +332,48 @@
             return div.innerHTML;
         }
 
-        function downloadTxt() {
-            if (!convertedText) return;
-            const blob = new Blob([convertedText], { type: 'text/plain;charset=utf-8' });
+        function escapeAttr(text) {
+            return btoa(encodeURIComponent(text));
+        }
+
+        function decodeAttr(encoded) {
+            return decodeURIComponent(atob(encoded));
+        }
+
+        function copyText(btn, encodedText) {
+            const text = decodeAttr(encodedText);
+            navigator.clipboard.writeText(text).then(() => {
+                btn.classList.add('copied');
+                btn.textContent = '✓';
+                setTimeout(() => {
+                    btn.classList.remove('copied');
+                    btn.textContent = '📋';
+                }, 1500);
+            });
+        }
+
+        function downloadSingle(baseName, encodedContent) {
+            const content = decodeAttr(encodedContent);
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            const baseName = (selectedFile?.name || 'output').replace(/\.(udf|zip|xml)$/gi, '').replace(/\.udf$/gi, '');
             a.download = baseName + '.txt';
             a.click();
             URL.revokeObjectURL(url);
+        }
+
+        function downloadAll() {
+            convertedResults.filter(r => !r.error).forEach(result => {
+                const baseName = result.filename.replace(/\.(udf|zip|xml)$/gi, '').replace(/\.udf$/gi, '');
+                const blob = new Blob([result.content], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = baseName + '.txt';
+                a.click();
+                URL.revokeObjectURL(url);
+            });
         }
     </script>
 </body>
