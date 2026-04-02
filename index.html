@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UDF to TXT Converter</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -268,14 +269,27 @@
                 let xmlContent;
 
                 if (bytes[0] === 0x50 && bytes[1] === 0x4B) {
-                    const zip = await JSZip.loadAsync(arrayBuffer);
-                    const contentFile = Object.keys(zip.files).find(name => name.endsWith('content.xml'));
+                    // Try JSZip first
+                    try {
+                        const zip = await JSZip.loadAsync(arrayBuffer);
+                        const contentFile = Object.keys(zip.files).find(name => name.endsWith('content.xml'));
 
-                    if (!contentFile) {
-                        throw new Error('ZIP icinde content.xml bulunamadi');
+                        if (contentFile) {
+                            xmlContent = await zip.files[contentFile].async('string');
+                        }
+                    } catch (zipError) {
+                        // JSZip failed - try manual extraction for streamed ZIPs with data descriptors
+                        xmlContent = null;
                     }
 
-                    xmlContent = await zip.files[contentFile].async('string');
+                    // If JSZip failed or didn't find content.xml, try manual parsing
+                    if (!xmlContent) {
+                        xmlContent = await extractFromStreamedZip(bytes);
+                    }
+
+                    if (!xmlContent) {
+                        throw new Error('ZIP icinde content.xml bulunamadi');
+                    }
                 } else {
                     xmlContent = new TextDecoder('utf-8').decode(bytes);
                 }
@@ -300,6 +314,83 @@
                     error: err.message
                 };
             }
+        }
+
+        // Manual extraction for streamed ZIP files with data descriptors (bit 3 set)
+        // These ZIPs have sizes=0 in local header, actual sizes in data descriptor after data
+        async function extractFromStreamedZip(bytes) {
+            const data = bytes;
+            let offset = 0;
+
+            while (offset < data.length - 4) {
+                // Look for local file header signature (PK\x03\x04)
+                if (data[offset] !== 0x50 || data[offset+1] !== 0x4B ||
+                    data[offset+2] !== 0x03 || data[offset+3] !== 0x04) {
+                    // Check for data descriptor (PK\x07\x08)
+                    if (data[offset] === 0x50 && data[offset+1] === 0x4B &&
+                        data[offset+2] === 0x07 && data[offset+3] === 0x08) {
+                        offset += 16; // Skip data descriptor (sig + crc + sizes)
+                        continue;
+                    }
+                    break;
+                }
+
+                // Parse local file header
+                const flags = data[offset+6] | (data[offset+7] << 8);
+                const compression = data[offset+8] | (data[offset+9] << 8);
+                let compressedSize = data[offset+18] | (data[offset+19] << 8) |
+                                     (data[offset+20] << 16) | (data[offset+21] << 24);
+                const filenameLen = data[offset+26] | (data[offset+27] << 8);
+                const extraLen = data[offset+28] | (data[offset+29] << 8);
+
+                const filename = new TextDecoder('utf-8').decode(
+                    data.slice(offset+30, offset+30+filenameLen)
+                );
+
+                const hasDataDescriptor = (flags & 0x08) !== 0;
+                const fileDataStart = offset + 30 + filenameLen + extraLen;
+
+                // If data descriptor flag is set and size is 0, find the descriptor
+                if (hasDataDescriptor && compressedSize === 0) {
+                    // Look for next PK signature (either data descriptor or next file)
+                    let descPos = -1;
+                    for (let i = fileDataStart; i < data.length - 4; i++) {
+                        if (data[i] === 0x50 && data[i+1] === 0x4B) {
+                            if ((data[i+2] === 0x07 && data[i+3] === 0x08) ||
+                                (data[i+2] === 0x03 && data[i+3] === 0x04)) {
+                                descPos = i;
+                                break;
+                            }
+                        }
+                    }
+                    if (descPos !== -1) {
+                        compressedSize = descPos - fileDataStart;
+                    }
+                }
+
+                const fileData = data.slice(fileDataStart, fileDataStart + compressedSize);
+
+                // Check if this is content.xml
+                if (filename.endsWith('content.xml')) {
+                    if (compression === 8) { // Deflate
+                        try {
+                            const decompressed = pako.inflateRaw(fileData);
+                            return new TextDecoder('utf-8').decode(decompressed);
+                        } catch (e) {
+                            console.error('Decompression error:', e);
+                        }
+                    } else if (compression === 0) { // Stored
+                        return new TextDecoder('utf-8').decode(fileData);
+                    }
+                }
+
+                offset = fileDataStart + compressedSize;
+                if (hasDataDescriptor) {
+                    offset += 16; // Skip data descriptor
+                }
+            }
+
+            return null;
         }
 
         function renderResultCard(result) {
